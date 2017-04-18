@@ -8,15 +8,16 @@ For detailed requirements and install instructions see [irkernel.github.io](http
 ## Requirements
 
 * [Jupyter](http://jupyter.org).
-* A current [R installation](http://www.r-project.org).
+* A current [R installation](https://www.R-project.org).
 
 ## Installation
 
 We will soon submit the IRkernel package to CRAN. Until then, you can install it via the `devtools` package:
 
 ```R
-install.packages(c('repr', 'IRdisplay', 'crayon', 'pbdZMQ', 'devtools'))
+install.packages('devtools')
 devtools::install_github('IRkernel/IRkernel')
+# or devtools::install_local('IRkernel-master.tar.gz')
 IRkernel::installspec()  # to register the kernel in the current R installation
 ```
 
@@ -64,7 +65,7 @@ If you have a Docker daemon running, e.g. reachable on localhost, start a contai
 docker run -d -p 8888:8888 jupyter/r-notebook
 ```
 
-In your browser open the URL <http://localhost:8888/>. All notebooks from your session will be saved in the current directory.
+Open localhost:8888 in your browser. All notebooks from your session will be saved in the current directory.
 
 On other platforms without docker, this can be started using `docker-machine` by replacing “localhost” with an IP from `docker-machine ip <MACHINE>`. With the deprecated `boot2docker`, this IP will be `boot2docker ip`.
 
@@ -72,5 +73,6 @@ On other platforms without docker, this can be started using `docker-machine` by
 
 ```bash
 make docker_dev_image #builds dev image and installs IRkernel dependencies from github
-make docker_dev #mounts source, installs, and runs Jupyter notebook
+make docker_dev #mounts source, installs, and runs Jupyter notebook; docker_dev_image is a prerequisite
+make docker_test #builds the package from source then runs the tests via R CMD check; docker_dev_image is a prerequisite
 ```

@@ -121,8 +121,9 @@ handle_shell = function() {
         history_request     = history(msg),
         complete_request    = complete(msg),
         is_complete_request = is_complete(msg),
+        inspect_request     = inspect(msg),
         shutdown_request    = shutdown(msg),
-        print(c('Got unhandled msg_type:', msg$header$msg_type)))
+        log_debug(c('Got unhandled msg_type:', msg$header$msg_type)))
         
     send_response('status', msg, 'iopub', list(
         execution_state = 'idle'))
@@ -163,6 +164,27 @@ abort_queued_messages = function() {
     }
     log_debug('abort loop: end')
 
+},
+
+handle_stdin = function() {
+    "React to a stdin message coming in"
+    
+    # wait for 'input_reply' response message
+    while (TRUE) {
+        log_debug('stdin loop: beginning')
+        zmq.poll(c(sockets$stdin),          # only stdin channel
+                 c(.pbd_env$ZMQ.PO$POLLIN)) # type
+        
+        if (bitwAnd(zmq.poll.get.revents(1), .pbd_env$ZMQ.PO$POLLIN)) {
+            log_debug('stdin loop: found msg')
+            parts <- zmq.recv.multipart(sockets$stdin, unserialize = FALSE)
+            msg <- wire_to_msg(parts)
+            return(msg$content$value)
+        } else {
+            # else shouldn't be possible
+            log_error('stdin loop: zmq.poll returned but no message found?')
+        }
+    }
 },
 
 is_complete = function(request) {
@@ -242,6 +264,70 @@ complete = function(request) {
         cursor_end = start_position + nchar(c.info$token)))
 },
 
+inspect = function(request) {
+    # 5.0 protocol:
+    code <- request$content$code
+    cursor_pos <- request$content$cursor_pos
+
+    title_templates <- list(
+        'text/plain' = '# %s:\n',
+        'text/html' = '<h1>%s:</h1>\n')
+    # Function to add a section to content.
+    add_new_section <- function(data, section_name, new_data) {
+        for (mime in names(title_templates)) {
+            new_content <- new_data[[mime]]
+            if (is.null(new_content)) next
+            title <- sprintf(title_templates[[mime]], section_name)
+            # use paste0 since sprintf cannot deal with format strings > 8192 bytes
+            data[[mime]] <- paste0(data[[mime]], title, new_content, '\n', sep = '\n')
+        }
+        return(data)
+    }
+
+    # Get token under the `cursor_pos`.
+    # Since `.guessTokenFromLine()` does not check the characters after `cursor_pos`
+    # check them by a loop.
+    token <- ''
+    for (i in seq(cursor_pos, nchar(code))) {
+        token_candidate <- utils:::.guessTokenFromLine(code, i)
+        if (nchar(token_candidate) == 0) break
+        token <- token_candidate
+    }
+
+    data <- namedlist()
+    if (nchar(token) != 0) {
+        tryCatch(
+            {
+                # In many cases `get(token)` works, but it does not
+                # in the cases such as `token` is a numeric constant or a reserved word.
+                # Therefore `eval()` is used here.
+                obj <- eval(parse(text = token))
+
+                class_data <- IRdisplay::prepare_mimebundle(class(obj))$data
+                data <- add_new_section(data, 'Class attribute', class_data)
+
+                print_data <- IRdisplay::prepare_mimebundle(obj)$data
+                data <- add_new_section(data, 'Printed form', print_data)
+            },
+            error = identity)
+        tryCatch(
+            {
+                # `help(token)` is  not used here because it does not works
+                # in the cases `token` is in `pkg::topic`or `pkg:::topic` form.
+                help_obj <- eval(parse(text = paste0('?', token)))
+                help_data <- IRdisplay::prepare_mimebundle(help_obj)$data
+                data <- add_new_section(data, 'Help document', help_data)
+            },
+            error = identity)
+    }
+    found <- length(data) != 0
+    send_response('inspect_reply', request, 'shell', list(
+        status = 'ok',
+        found = found,
+        data = data,
+        metadata = namedlist()))
+},
+
 history = function(request) {
     send_response('history_reply', request, 'shell', list(history = list()))
 },
@@ -271,7 +357,7 @@ handle_control = function() {
         log_debug('Control: shutdown...')
         shutdown(msg)
     } else {
-        print(paste('Unhandled control message, msg_type:', msg$header$msg_type))
+        log_debug(paste('Unhandled control message, msg_type:', msg$header$msg_type))
     }
 },
 
@@ -306,8 +392,11 @@ initialize = function(connection_file) {
     zmq.bind(sockets$stdin,   url_with_port('stdin_port'))
     zmq.bind(sockets$shell,   url_with_port('shell_port'))
 
-    executor <<- Executor$new(send_response = .self$send_response,
+    executor <<- Executor$new(
+        send_response         = .self$send_response,
+        handle_stdin          = .self$handle_stdin,
         abort_queued_messages = .self$abort_queued_messages)
+    
     comm_manager <<- CommManager$new(send_response = .self$send_response)
     runtime_env$comm_manager <- comm_manager
 },
@@ -321,7 +410,7 @@ run = function() {
             rep(.pbd_env$ZMQ.PO$POLLIN, 3))
         log_debug('main loop: after poll')
 
-        # It's important that these messages are handler one  by one in each
+        # It's important that these messages are handled one by one in each
         # look. The problem is that during the handler, a new zmq.poll could be
         # done (and is done in case of errors in a execution request) and this
         # invalidates the zmq.poll.get.revents call leading to "funny" results

@@ -62,6 +62,7 @@ Executor <- setRefClass(
     Class = 'Executor',
     fields = list(
         send_response         = 'function',
+        handle_stdin          = 'function',
         abort_queued_messages = 'function',
         execution_count       = 'integer',
         payload               = 'list',
@@ -77,7 +78,8 @@ is_silent = function() {
 },
 
 should_store_history = function() {
-    current_request$content$store_history
+    sh <- current_request$content$store_history
+    !is.null(sh) && sh
 },
 
 send_error_msg = function(msg) {
@@ -117,6 +119,25 @@ quit = function(save = 'default', status = 0, runLast = TRUE) {
     }
     if (save) NULL  # TODO: actually save history
     payload <<- c(.self$payload, list(list(source = 'ask_exit', keepkernel = FALSE)))
+},
+
+# noninteractive
+readline = function(prompt = '') {
+    log_debug('entering custom readline')
+    send_response('input_request', current_request, 'stdin',
+        list(prompt = prompt, password = FALSE))
+    # wait for 'input_reply' response message
+    input <- handle_stdin()
+},
+
+# noninteractive 5.0 protocol:
+get_pass = function(prompt = '') {
+    log_debug('entering custom get_pass')
+    send_response('input_request', current_request, 'stdin',
+        list(prompt = prompt, password = TRUE))
+    # wait for 'input_reply' response message
+    log_debug('exiting custom get_pass')
+    input <- handle_stdin()
 },
 
 handle_error = function(e) tryCatch({
@@ -222,9 +243,15 @@ execute = function(request) {
     payload <<- list()
     err <<- list()
     
+    # shade base::readline
+    replace_in_base_namespace('readline', .self$readline)
+    
+    # shade getPass::getPass
+    add_to_user_searchpath('getPass', .self$get_pass)
+    
     # shade base::quit
-    add_to_user_searchpath('quit', .self$quit)
-    add_to_user_searchpath('q', .self$quit)
+    replace_in_base_namespace('quit', .self$quit)
+    replace_in_base_namespace('q', .self$quit)
 
     # find out stack depth in notebook cell
     # TODO: maybe replace with a single call on first execute and rest reuse the value?
@@ -307,12 +334,13 @@ initialize = function(...) {
             text <- c(text, header, readLines(path))
         }
         if (delete.file) file.remove(files)
-        page(list('text/plain' = paste(text, collapse = '\n')))
+        data <- list('text/plain' = paste(text, collapse = '\n'))
+        page(list(data=data, metadata=namedlist()))
     })
     options(jupyter.base_display_func = .self$display_data)
     # Create the shadow env here and detach it finalize
     # so it's available for the whole lifetime of the kernel.
-    attach(NULL, name = 'jupyter:irkernel')
+    .BaseNamespaceEnv$attach(NULL, name = 'jupyter:irkernel')
 
     # Add stuff to the user environment and configure a few options
     # in the current session

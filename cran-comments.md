@@ -11,19 +11,19 @@ other frontends) submits to the kernel via the network.
 
 ## R CMD check results
 
-There are no ERRORS and no WARNINGs and 1 NOTEs.
+```r
+Found the following (possibly) invalid URLs:
+  URL: http://localhost:8888/
+    From: README.md
+    Status: Error
+    Message: libcurl Fehlercode 7
+    \tFailed to connect to localhost port 8888: Verbindungsaufbau abgelehnt
 
-Note:
+Status: 1 NOTE
+```
 
-* Found the following calls to attach():
-  File 'IRkernel/R/execution.r':
-    attach(NULL, name = "jupyter:irkernel")
-  See section 'Good practice' in '?attach'.
-
-  We use this additional environment to add functions so that regular "stuff"
-  like `quit()` works in the IRkernel environment (in this case to shutdown the
-  kernel). We added the "good practice" call to `detach` in `finalize` so that
-  this environment is available as long as the R kernel is running.
+This arises from the fact that a common usage of this package involves starting a
+server on localhost. As expected this URL is only reachable after starting it.
 
 ## Downstream dependencies
 

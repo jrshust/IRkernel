@@ -6,6 +6,11 @@ add_to_user_searchpath <- function(name, FN) {
     assign(name, FN, 'jupyter:irkernel')
 }
 
+replace_in_base_namespace <- function(name, FN) {
+    .BaseNamespaceEnv$unlockBinding(name, baseenv())
+    assign(name, FN, baseenv())
+}
+
 get_shadowenv <- function() {
     as.environment('jupyter:irkernel')
 }
@@ -50,7 +55,7 @@ init_cran_repo <- function() {
     r <- getOption('repos')
     is_unuseable_mirror <- identical(r, c(CRAN = '@CRAN@'))
     if (is_unuseable_mirror) {
-        # the default repo according to https://cran.r-project.org/mirrors.html
+        # the default repo according to https://cran.R-project.org/mirrors.html
         # uses geo-redirects
         r[['CRAN']] <- 'https://cran.r-project.org'
         # attribute indicating the repos was set by us...
@@ -71,9 +76,7 @@ init_null_device <- function() {
     # 2. can handle /dev/null (unlike OSX devices)
     # since there is nothing like that on OSX AFAIK, use pdf there (accepting warnings).
     
-    os <- switch(.Platform$OS.type,
-        windows = 'win',
-        unix = if (identical(Sys.info()[['sysname']], 'Darwin')) 'osx' else 'unix')
+    os <- get_os()
     
     ok_device     <- switch(os, win = png,   osx = pdf,  unix = png)
     null_filename <- switch(os, win = 'NUL', osx = NULL, unix = '/dev/null')
